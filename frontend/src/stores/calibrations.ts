@@ -1,0 +1,1 @@
+import {entityStore} from "./entity";import {publishCalibration} from "../api/calibrations";const base=entityStore("calibrations");async function publish(id:string){await publishCalibration(id);await base.load()}export const calibrations={...base,publish};

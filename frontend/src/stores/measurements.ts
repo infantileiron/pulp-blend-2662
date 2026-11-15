@@ -1,0 +1,1 @@
+import {entityStore} from "./entity";import {reimportMeasurement} from "../api/measurements";const base=entityStore("measurements");async function reimport(id:string,csv_text:string){await reimportMeasurement(id,{csv_text});await base.load()}export const measurements={...base,reimport};

@@ -6,7 +6,9 @@
 
 原流程用 `cenyue_pulp_202611.csv` 的检测值和报价在Excel手调比例。三个痛点是质量界限相互冲突、名义低成本配方对波动脆弱、成本/属性扰动没有统一口径。上游为模拟原浆中心属性、报价、供给上下限与误差宽度；本项目替代名义配比求解和固定配方评价；下游由配方组对照实验与真实工艺复核。
 
-六实体贯穿数据库、Python Model/Schema/Service/Controller/Route、Vue API/Store/页面：PulpDataset、QualitySpec、BlendScenario、BlendRun、FormulaReview、Report。六业务页为总览、原浆检测、质量窗口、试算情景、运行底稿、配方归档，另有管理员审计。
+原浆检测常同涨同跌，独立扰动会低估配方风险。为此支持导入按检测批号配对的多原浆实测记录，估计联合扰动校准：Spearman秩相关按成对完整样本计算，缺测留空不补零；试算用Iman–Conover重排在保留均匀边际与每维分层的前提下诱导目标秩相关。样本不足或相关矩阵非半正定时写明原因（轻微不可实现投影至最近相关矩阵并披露调整量），绝不以独立抽样冒充联合扰动。
+
+八实体贯穿数据库、Python Model/Schema/Service/Controller/Route、Vue API/Store/页面：PulpDataset、QualitySpec、BlendScenario、BlendRun、FormulaReview、Report、MeasurementSet、JointCalibration。七业务页为总览、原浆检测、质量窗口、试算情景、联合校准、运行底稿、配方归档，另有管理员审计。
 
 ## 启动与技术
 
@@ -30,7 +32,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 五服务恰好frontend/backend/worker/db/redis，全部healthcheck，数据库/Redis/共享产物具名卷。清理 `docker compose down -v --remove-orphans`；保留数据时省略 `-v`。
 
-结构：`backend/src/{models,schemas,services,controllers,routes}`按六实体分层，`services/materials.py`校验CSV，`linear_blend.py`求名义配方，`lhs_robustness.py`构造LHS并评价固定配方；`config,utils,middlewares`提供配置/数据库/认证/队列/审计/错误。种子 `backend/scripts/seed_demo.py`；`migrations/001_schema.sql`说明新库基线，实际启动以元数据建表。前端 `src/{api,stores,types,constants,hooks,utils,router,pages}`；RecipeBars、QualityTable、SampleCloud用于总览/结果/归档。测试、日志、截图在批次外层 `test-artifacts/gb-2306`，不放本源码目录。
+结构：`backend/src/{models,schemas,services,controllers,routes}`按八实体分层，`services/materials.py`校验原浆CSV，`paired_measurements.py`校验配对实测CSV，`linear_blend.py`求名义配方，`lhs_robustness.py`构造LHS并评价固定配方，`joint_calibration.py`估计秩相关并做Iman–Conover诱导；`config,utils,middlewares`提供配置/数据库/认证/队列/审计/错误。种子 `backend/scripts/seed_demo.py`；`migrations/001_schema.sql`说明新库基线，`002_joint_calibration.sql`说明联合校准加列，实际启动以元数据建表。前端 `src/{api,stores,types,constants,hooks,utils,router,pages}`；RecipeBars、QualityTable、SampleCloud用于总览/结果/归档。测试、日志、截图在批次外层 `test-artifacts/`，不放本源码目录；联合校准验证在 `test-artifacts/joint-calibration`。
 
 本地开发：安装requirements并设置可用DATABASE_URL/REDIS_URL，从backend运行 `uvicorn src.main:app --reload`，另起 `python -m src.worker`；前端 `npm ci && npm run dev`，构建 `npm run build`。默认OpenBLAS/OMP线程1，避免小型试算占满主机。
 
@@ -58,7 +60,13 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 cost为元/吨，正且≤1e6；min_share/max_share为0至1的比例且下界≤上界。强度为0至100的**模拟指数**，白度为0至100%，回收纤维率为0至1。每个width为对应单位的非负±幅度，中心±幅度必须完整落在物理范围，成本下界严格正。不会截断抽样值来掩盖非法区间。重复ID、缺失/非有限数、非法区间拒绝；总供给或质量冲突留给求解器返回不可行。
 
-规格六个上下界必须有序且在上述物理范围。每个情景20至2000个LHS样本、非负整数seed，成本扰动开关独立保存。
+规格六个上下界必须有序且在上述物理范围。每个情景20至2000个LHS样本、非负整数seed，成本扰动开关独立保存；`calibration_id`可空，空即明确声明的独立均匀扰动。
+
+配对实测CSV列：`batch_id,material_id,strength,whiteness,recycled[,cost]`。同一检测批号下各原浆实测成行配对；缺测留空，估计时按成对完整样本计算，绝不补零。每维至少8条实测、每对维度至少6批交集；常量维度（如零扰动宽度原浆）秩相关无定义，剔除并明示。估计失败（样本不足/相关矩阵非半正定且不可诚实修复）的校准保存为invalid并写明原因，不能发布，也不退化为独立抽样。
+
+## 校准生命周期与并发口径
+
+校准从草稿发布后供情景选择；发布为条件更新的原子迁移，并发发布只有一个生效，失败者409且旧版状态不变。源数据reimport使版本号递增，同事务把基于旧版的草稿/已发布校准置为stale并拒绝新试算与发布；内容未变化的reimport拒绝，失败保留旧版。试算创建时把情景、原浆批次、质量窗口、校准及其源版本成套冻结进运行记录，并发发布/更新下不会拼出混合版本；已完成与已排队结果仍可回读复算。底稿展示目标与实际Spearman秩相关、每对有效样本数、最小特征值与修复披露。
 
 ## 两个真实Python算法
 
@@ -71,6 +79,8 @@ cost为元/吨，正且≤1e6；min_share/max_share为0至1的比例且下界≤
 LP结果核验和LHS质量判断**共用绝对容差1e-7**：质量属性以各自单位比较，下界减容差/上界加容差；比例和与供给界限以比例单位比较。物理样本值不因此修改。容差写入结果、配方CSV及扰动样本CSV的 `quality_comparison_tolerance`。这是数值边界处理，不是工业质量容差或追加质量保证。
 
 LHS每维u_j=(该维随机排列的0..N−1 + 独立U[0,1)抖动)/N，保证每维每个1/N区间恰一个样本；seed固定可复现。每原浆3个属性潜在维度，成本开启再加每原浆1维，即D=3M或4M。零宽度维仍有分层潜在u，但变换后是真正常量。
+
+选择已发布联合校准时，先按上式生成独立LHS，再用Iman–Conover按校准的Spearman目标矩阵只重排各维次序诱导秩相关：每列取值集合不变，均匀边际与每维分层严格保留；目标矩阵可半正定（含完全正负相关），零宽度常量维不参与诱导。底稿同时给出目标与样本实际秩相关矩阵及最大/平均绝对偏差，不掩饰诱导误差。
 
 将每维映射到该原浆属性的 `[center−width,center+width]` 独立均匀区间，始终使用**名义LP求得的同一组x**加权重新评价；不在样本中重新优化。成本开启按同类独立均匀区间扰动，关闭则所有样本成本固定名义值。所有三属性上下界均满足数值比较口径才计通过，报告通过数/N、失败数、成本5/50/95分位及每样本值。
 

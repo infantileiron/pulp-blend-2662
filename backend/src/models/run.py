@@ -6,5 +6,6 @@ class BlendRun(RecordMixin,Base):
  __tablename__="runs"
  scenario_id:Mapped[str]=mapped_column(ForeignKey("scenarios.id"))
  status:Mapped[str]=mapped_column(String(20),default="queued")
+ inputs:Mapped[dict]=mapped_column(JSON,default=dict)
  result:Mapped[dict]=mapped_column(JSON,default=dict)
  error:Mapped[str]=mapped_column(Text,default="")

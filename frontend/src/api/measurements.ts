@@ -1,0 +1,1 @@
+import {request} from "./client";export const fetchMeasurements=()=>request("/measurements");export const createMeasurements=(body:unknown)=>request("/measurements","POST",body);export const reimportMeasurement=(id:string,body:unknown)=>request("/measurements/"+id,"PUT",body);

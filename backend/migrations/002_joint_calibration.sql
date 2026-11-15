@@ -1,0 +1,5 @@
+-- 联合扰动校准（2026-11）：新增 measurements / calibrations 两表，由 SQLAlchemy 元数据自动创建。
+-- 既有库需人工执行以下 ALTER，元数据不会自动加列：
+--   ALTER TABLE scenarios ADD COLUMN calibration_id VARCHAR(36) NULL;
+--   ALTER TABLE runs ADD COLUMN inputs JSON NULL;
+-- 校准生命周期：draft → published；源数据 reimport 使旧校准 stale 并拒绝新试算，已完成结果仍可回读。

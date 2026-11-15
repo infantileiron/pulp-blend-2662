@@ -10,3 +10,4 @@ class BlendScenario(RecordMixin,Base):
  n_samples:Mapped[int]
  seed:Mapped[int]
  perturb_cost:Mapped[bool]
+ calibration_id:Mapped[str]=mapped_column(String(36),ForeignKey("calibrations.id"),nullable=True)
